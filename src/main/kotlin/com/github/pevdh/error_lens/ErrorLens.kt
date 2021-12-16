@@ -1,4 +1,4 @@
-package io.github.pevdh.error_lens
+package com.github.pevdh.error_lens
 
 import com.intellij.codeInsight.daemon.impl.HighlightInfo
 import com.intellij.lang.annotation.HighlightSeverity
@@ -29,17 +29,9 @@ import java.util.*
 
 private val logger = Logger.getInstance("io.github.pevdh.error_lens")
 
-private val colorMap = mapOf(
-    HighlightSeverity.WEAK_WARNING to Color(0x756D56),
-    HighlightSeverity.WARNING to Color(0xFFC31F),
-    HighlightSeverity.ERROR to Color(0xFF6565),
-)
-private val defaultColor = Color(0xFF6565)
-
-private const val REANALYZE_DELAY_MS = 200
-
 class ErrorLensStartupActivity : StartupActivity {
     private val lenses: MutableMap<Editor, ErrorLens> = concurrentMapOf()
+    private val settings = ErrorLensSettings.instance
 
     override fun runActivity(project: Project) {
         val editorFactory = EditorFactory.getInstance()
@@ -74,7 +66,8 @@ class ErrorLensStartupActivity : StartupActivity {
         return ErrorLens(
             document,
             editor.inlayModel,
-            markupModel
+            markupModel,
+            settings
         )
     }
 }
@@ -83,6 +76,7 @@ class ErrorLens(
     private val document: Document,
     private val inlayModel: InlayModel,
     markupModel: MarkupModelEx,
+    private val settings: ErrorLensSettings
 ) : Disposable {
     private val highlighters = mutableListOf<RangeHighlighter>()
 
@@ -94,7 +88,7 @@ class ErrorLens(
             override fun afterAdded(highlighter: RangeHighlighterEx) {
                 val info = extractHighlightInfo(highlighter) ?: return
 
-                if (isInteresting(info)) {
+                if (highlightSeverities.contains(info.severity)) {
                     annotateFileError(highlighter)
                 }
             }
@@ -105,10 +99,6 @@ class ErrorLens(
 
             private fun extractHighlightInfo(highlighter: RangeHighlighterEx): HighlightInfo? {
                 return highlighter.errorStripeTooltip as? HighlightInfo ?: return null
-            }
-
-            private fun isInteresting(info: HighlightInfo): Boolean {
-                return info.severity.myVal >= HighlightSeverity.WEAK_WARNING.myVal
             }
         })
 
@@ -175,7 +165,7 @@ class ErrorLens(
         }
 
         alarm.cancelAllRequests()
-        alarm.addRequest({ reanalyzeLines() }, REANALYZE_DELAY_MS)
+        alarm.addRequest({ reanalyzeLines() }, settings.reanalyzeDelayMs)
     }
 
     private fun reanalyzeLines() {
@@ -229,7 +219,9 @@ class ErrorLens(
     }
 
     private fun determineColorForErrorSeverity(severity: HighlightSeverity): Color =
-        colorMap.getOrDefault(severity, defaultColor)
+        settings.getColorForSeverity(severity)
+            ?: defaultColors[severity]
+            ?: throw RuntimeException("Unable to determine color for " + severity.name)
 
     override fun dispose() {
     }

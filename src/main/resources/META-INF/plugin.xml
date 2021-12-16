@@ -15,6 +15,9 @@
     <idea-version since-build="212.0"/>
 
     <extensions defaultExtensionNs="com.intellij">
-        <postStartupActivity implementation="io.github.pevdh.error_lens.ErrorLensStartupActivity"/>
+        <postStartupActivity implementation="com.github.pevdh.error_lens.ErrorLensStartupActivity"/>
+        <applicationService serviceImplementation="com.github.pevdh.error_lens.ErrorLensSettings"/>
+        <applicationConfigurable parentId="editor" instance="com.github.pevdh.error_lens.ErrorLensConfigurable"
+                                 id="com.github.pevdh.error_lens.ErrorLensConfigurable" displayName="Error Lens"/>
     </extensions>
 </idea-plugin>
