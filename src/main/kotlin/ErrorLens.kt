@@ -30,13 +30,13 @@ import java.util.*
 private val logger = Logger.getInstance("io.github.pevdh.error_lens")
 
 private val colorMap = mapOf(
-    HighlightSeverity.WEAK_WARNING to Color(0x72737A),
+    HighlightSeverity.WEAK_WARNING to Color(0x756D56),
     HighlightSeverity.WARNING to Color(0xFFC31F),
     HighlightSeverity.ERROR to Color(0xFF6565),
 )
 private val defaultColor = Color(0xFF6565)
 
-private val REANALYZE_DELAY_MS = 200
+private const val REANALYZE_DELAY_MS = 200
 
 class ErrorLensStartupActivity : StartupActivity {
     private val lenses: MutableMap<Editor, ErrorLens> = concurrentMapOf()
@@ -115,7 +115,7 @@ class ErrorLens(
         document.addDocumentListener(object : DocumentListener {
             override fun beforeDocumentChange(event: DocumentEvent) {
                 if (event.offset >= 0 && event.offset <= document.textLength) {
-                    val line = document.getLineNumber(event.offset);
+                    val line = document.getLineNumber(event.offset)
                     deleteLabelsAtLineAndScheduleReanalyzeLine(line)
                 }
             }
