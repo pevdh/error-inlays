@@ -1,0 +1,20 @@
+<idea-plugin>
+    <id>io.github.pevdh.error-lens</id>
+    <name>Error Lens</name>
+    <vendor>Pieter van den Ham</vendor>
+
+    <description><![CDATA[
+    Error Lens like VS Code's Error Lens plugin, but for JetBrains IDEs
+    ]]></description>
+
+    <!-- please see https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html
+         on how to target different products -->
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lang</depends>
+
+    <idea-version since-build="212.0"/>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <postStartupActivity implementation="io.github.pevdh.error_lens.ErrorLensStartupActivity"/>
+    </extensions>
+</idea-plugin>
