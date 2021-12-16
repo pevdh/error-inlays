@@ -6,6 +6,8 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.*
 import com.intellij.openapi.editor.colors.EditorFontType
+import com.intellij.openapi.editor.event.DocumentEvent
+import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.event.EditorFactoryEvent
 import com.intellij.openapi.editor.event.EditorFactoryListener
 import com.intellij.openapi.editor.ex.MarkupModelEx
@@ -18,10 +20,12 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.StartupActivity
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.components.JBLabel
+import com.intellij.util.Alarm
 import com.jetbrains.rd.util.concurrentMapOf
 import java.awt.Color
 import java.awt.Graphics
 import java.awt.Rectangle
+import java.util.*
 
 private val logger = Logger.getInstance("io.github.pevdh.error_lens")
 
@@ -31,6 +35,8 @@ private val colorMap = mapOf(
     HighlightSeverity.ERROR to Color(0xFF6565),
 )
 private val defaultColor = Color(0xFF6565)
+
+private val REANALYZE_DELAY_MS = 200
 
 class ErrorLensStartupActivity : StartupActivity {
     private val lenses: MutableMap<Editor, ErrorLens> = concurrentMapOf()
@@ -80,6 +86,9 @@ class ErrorLens(
 ) : Disposable {
     private val highlighters = mutableListOf<RangeHighlighter>()
 
+    private val linesToReanalyze = Collections.synchronizedList<Int>(mutableListOf())
+    private val alarm: Alarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
+
     init {
         markupModel.addMarkupModelListener(this, object : MarkupModelListener {
             override fun afterAdded(highlighter: RangeHighlighterEx) {
@@ -102,6 +111,15 @@ class ErrorLens(
                 return info.severity.myVal >= HighlightSeverity.WEAK_WARNING.myVal
             }
         })
+
+        document.addDocumentListener(object : DocumentListener {
+            override fun beforeDocumentChange(event: DocumentEvent) {
+                if (event.offset >= 0 && event.offset <= document.textLength) {
+                    val line = document.getLineNumber(event.offset);
+                    deleteLabelsAtLineAndScheduleReanalyzeLine(line)
+                }
+            }
+        }, this)
     }
 
     private fun annotateFileError(highlighter: RangeHighlighter) {
@@ -136,11 +154,10 @@ class ErrorLens(
             }
     }
 
-    private fun refreshLabelAtLine(line: Int) {
+    private fun removeInlaysAtLine(line: Int) {
         val startOffset = document.getLineStartOffset(line)
         val endOffset = document.getLineEndOffset(line)
 
-        // Remove existing elements at this line
         inlayModel
             .getAfterLineEndElementsInRange(
                 startOffset,
@@ -148,6 +165,38 @@ class ErrorLens(
                 ErrorLabel::class.java
             )
             .forEach { inlay -> Disposer.dispose(inlay) }
+    }
+
+    private fun deleteLabelsAtLineAndScheduleReanalyzeLine(line: Int) {
+        removeInlaysAtLine(line)
+
+        synchronized(linesToReanalyze) {
+            linesToReanalyze.add(line)
+        }
+
+        alarm.cancelAllRequests()
+        alarm.addRequest({ reanalyzeLines() }, REANALYZE_DELAY_MS)
+    }
+
+    private fun reanalyzeLines() {
+        val lines = synchronized(linesToReanalyze) {
+            val copy = linesToReanalyze.toList()
+            linesToReanalyze.clear()
+
+            copy
+        }
+
+        lines.forEach { line ->
+            if (line < 0 || line >= document.lineCount) {
+                return
+            }
+
+            refreshLabelAtLine(line)
+        }
+    }
+
+    private fun refreshLabelAtLine(line: Int) {
+        removeInlaysAtLine(line)
 
         val relevantHighlighters = highlighters
             .filter { highlighter -> document.getLineNumber(highlighter.startOffset) == line && (highlighter.errorStripeTooltip as? HighlightInfo)?.description != null }
@@ -169,7 +218,9 @@ class ErrorLens(
             highestSeverityHighlightInfo.description + rest
         }
 
-        val errorLabel = ErrorLabel(JBLabel(description), determineColorForErrorSeverity(severity), line, relevantHighlighters)
+        val errorLabel =
+            ErrorLabel(JBLabel(description), determineColorForErrorSeverity(severity), line, relevantHighlighters)
+        val endOffset = document.getLineEndOffset(line)
         val inlay = inlayModel.addAfterLineEndElement(endOffset, true, errorLabel)
         if (inlay == null) {
             logger.warn("Unable to create inlay with description \"$description\"")
