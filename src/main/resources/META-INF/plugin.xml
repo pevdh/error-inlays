@@ -13,9 +13,9 @@
     <depends>com.intellij.modules.lang</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <postStartupActivity implementation="com.github.pevdh.error_lens.ErrorLensStartupActivity"/>
-        <applicationService serviceImplementation="com.github.pevdh.error_lens.ErrorLensSettings"/>
-        <applicationConfigurable parentId="editor" instance="com.github.pevdh.error_lens.ErrorLensConfigurable"
-                                 id="com.github.pevdh.error_lens.ErrorLensConfigurable" displayName="Error Lens"/>
+        <postStartupActivity implementation="io.github.pevdh.error_lens.ErrorLensStartupActivity"/>
+        <applicationService serviceImplementation="io.github.pevdh.error_lens.ErrorLensSettings"/>
+        <applicationConfigurable parentId="editor" instance="io.github.pevdh.error_lens.ErrorLensConfigurable"
+                                 id="io.github.pevdh.error_lens.ErrorLensConfigurable" displayName="Error Lens"/>
     </extensions>
 </idea-plugin>

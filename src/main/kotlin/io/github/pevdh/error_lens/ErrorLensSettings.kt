@@ -1,4 +1,4 @@
-package com.github.pevdh.error_lens
+package io.github.pevdh.error_lens
 
 import com.intellij.lang.annotation.HighlightSeverity
 import com.intellij.openapi.application.ApplicationManager
@@ -129,7 +129,7 @@ class ErrorLensSettingsComponent {
     }
 }
 
-@State(name = "com.github.pevdh.error_lens.ErrorLensSettings", storages = [Storage("ErrorLensPluginSettings.xml")])
+@State(name = "io.github.pevdh.error_lens.ErrorLensSettings", storages = [Storage("ErrorLensPluginSettings.xml")])
 data class ErrorLensSettings(
     var reanalyzeDelayMs: Int,
     var severityColors: MutableMap<String, Int>,

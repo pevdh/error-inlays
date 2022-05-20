@@ -1,4 +1,4 @@
-package com.github.pevdh.error_lens
+package io.github.pevdh.error_lens
 
 import com.intellij.codeInsight.daemon.impl.HighlightInfo
 import com.intellij.lang.annotation.HighlightSeverity
