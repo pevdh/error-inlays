@@ -12,8 +12,6 @@
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.lang</depends>
 
-    <idea-version since-build="212.0"/>
-
     <extensions defaultExtensionNs="com.intellij">
         <postStartupActivity implementation="com.github.pevdh.error_lens.ErrorLensStartupActivity"/>
         <applicationService serviceImplementation="com.github.pevdh.error_lens.ErrorLensSettings"/>
