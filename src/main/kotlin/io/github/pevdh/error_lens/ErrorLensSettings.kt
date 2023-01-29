@@ -142,7 +142,7 @@ data class ErrorLensSettings(
     )
 
     companion object {
-        val instance
+        val instance: ErrorLensSettings
             get() = ApplicationManager.getApplication().getService(ErrorLensSettings::class.java)
     }
 

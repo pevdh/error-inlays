@@ -3,21 +3,16 @@ package io.github.pevdh.error_lens
 import com.intellij.codeInsight.daemon.impl.HighlightInfo
 import com.intellij.lang.annotation.HighlightSeverity
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.*
 import com.intellij.openapi.editor.colors.EditorFontType
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
-import com.intellij.openapi.editor.event.EditorFactoryEvent
-import com.intellij.openapi.editor.event.EditorFactoryListener
 import com.intellij.openapi.editor.ex.MarkupModelEx
 import com.intellij.openapi.editor.ex.RangeHighlighterEx
 import com.intellij.openapi.editor.impl.DocumentMarkupModel
 import com.intellij.openapi.editor.impl.event.MarkupModelListener
 import com.intellij.openapi.editor.markup.TextAttributes
-import com.intellij.openapi.project.Project
-import com.intellij.openapi.startup.StartupActivity
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.Alarm
@@ -25,131 +20,101 @@ import java.awt.Color
 import java.awt.Graphics
 import java.awt.Rectangle
 
-private val logger = Logger.getInstance(ErrorLens::class.java)
-
-class ErrorLensStartupActivity : StartupActivity {
-    private val lenses: MutableMap<Editor, ErrorLens> = mutableMapOf()
-    private val settings = ErrorLensSettings.instance
-
-    override fun runActivity(project: Project) {
-        val editorFactory = EditorFactory.getInstance()
-        editorFactory
-            .addEditorFactoryListener(object : EditorFactoryListener {
-                override fun editorCreated(event: EditorFactoryEvent) {
-                    assertIsEdt()
-
-                    attachToEditor(event.editor)
-                }
-
-                override fun editorReleased(event: EditorFactoryEvent) {
-                    assertIsEdt()
-
-                    val lens = lenses[event.editor] ?: return
-                    Disposer.dispose(lens)
-                    lenses.remove(event.editor)
-                }
-            }, project)
-
-        editorFactory.allEditors.forEach { attachToEditor(it) }
-    }
-
-    private fun attachToEditor(editor: Editor) {
-        lenses[editor] = createErrorLens(editor) ?: return
-    }
-
-    private fun createErrorLens(editor: Editor): ErrorLens? {
-        val project = editor.project ?: return null
-        val document = editor.document
-
-        val markupModel = DocumentMarkupModel.forDocument(document, project, true)
-
-        if (markupModel !is MarkupModelEx) {
-            return null
-        }
-
-        return ErrorLens(
-            document,
-            editor.inlayModel,
-            markupModel,
-            settings
-        )
-    }
-}
+private val LOGGER = Logger.getInstance(ErrorLens::class.java)
 
 class ErrorLens(
     private val document: Document,
     private val inlayModel: InlayModel,
-    markupModel: MarkupModelEx,
-    private val settings: ErrorLensSettings
+    private val settings: ErrorLensSettings,
 ) : Disposable {
     private val problems = Problems()
 
     private val linesToReanalyze = mutableSetOf<Int>()
-    private val alarm: Alarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
+    private val alarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
 
-    init {
-        markupModel.addMarkupModelListener(this, object : MarkupModelListener {
-            override fun afterAdded(highlighter: RangeHighlighterEx) {
-                assertIsEdt()
+    companion object {
+        fun tryCreateNewInstance(editor: Editor): ErrorLens? {
+            val project = editor.project ?: return null
+            val document = editor.document
 
-                val problem = tryConvertToProblem(highlighter)
-                    ?: return
-
-                logger.info("Problem appeared: $problem")
-                if (highlightSeverities.contains(problem.severity)) {
-                    addProblemToInlineError(problem)
-                }
+            val markupModel = DocumentMarkupModel.forDocument(document, project, true)
+            if (markupModel !is MarkupModelEx) {
+                return null
             }
 
-            override fun beforeRemoved(highlighter: RangeHighlighterEx) {
-                assertIsEdt()
+            val lens = ErrorLens(document, editor.inlayModel, ErrorLensSettings.instance)
 
-                val problem = tryConvertToProblem(highlighter)
-                    ?: return
-
-                logger.info("Problem disappeared: $problem")
-                maybeRemoveInlayBecauseProblemDisappeared(problem)
-            }
-
-            private fun tryConvertToProblem(highlighter: RangeHighlighterEx): Problem? {
-                if (highlighter.startOffset > document.textLength) {
-                    // Problem is no longer visible
-                    return null
+            markupModel.addMarkupModelListener(lens, object : MarkupModelListener {
+                override fun afterAdded(highlighter: RangeHighlighterEx) {
+                    lens.notifyHighlighterAdded(highlighter)
                 }
 
-                val line = document.getLineNumber(highlighter.startOffset)
-                val info = highlighter.errorStripeTooltip as? HighlightInfo ?: return null
-                val severity = info.severity
-                val description = info.description ?: return null
+                override fun beforeRemoved(highlighter: RangeHighlighterEx) {
+                    lens.notifyHighlighterRemoved(highlighter)
+                }
+            })
 
-                return Problem(
-                    highlighterId = highlighter.id,
-                    line = line,
-                    severity = severity,
-                    description = description,
-                )
+            document.addDocumentListener(object : DocumentListener {
+                override fun beforeDocumentChange(event: DocumentEvent) {
+                    lens.notifyLineChanged(document.getLineNumber(event.offset))
+                }
+            }, lens)
+
+            markupModel.allHighlighters.forEach { highlighter ->
+                lens.notifyHighlighterAdded(highlighter as RangeHighlighterEx)
             }
-        })
 
-        document.addDocumentListener(object : DocumentListener {
-            override fun beforeDocumentChange(event: DocumentEvent) {
-                assertIsEdt()
-
-                val line = document.getLineNumber(event.offset)
-
-                logger.info("Line changed: $line")
-                removeInlineErrorAtLineAndScheduleReanalyzeLines(line)
-            }
-        }, this)
+            return lens
+        }
     }
 
-    private fun addProblemToInlineError(problem: Problem) {
-        problems.add(problem)
+    fun notifyHighlighterAdded(highlighter: RangeHighlighterEx) {
+        val problem = tryConvertToProblem(highlighter) ?: return
+        LOGGER.debug("Problem appeared: $problem")
 
+        problems.add(problem)
         refreshInlineErrorAtLine(problem.line)
     }
 
-    private fun maybeRemoveInlayBecauseProblemDisappeared(problem: Problem) {
+    fun notifyHighlighterRemoved(highlighter: RangeHighlighterEx) {
+        val problem = tryConvertToProblem(highlighter) ?: return
+        LOGGER.debug("Problem disappeared: $problem")
+
+        maybeRemoveInlineErrorBecauseProblemDisappeared(problem)
+    }
+
+    fun notifyLineChanged(line: Int) {
+        LOGGER.debug("Line changed: $line")
+
+        removeInlineErrorAtLine(line)
+        linesToReanalyze.add(line)
+        scheduleReanalyzeLines()
+    }
+
+    private fun tryConvertToProblem(highlighter: RangeHighlighterEx): Problem? {
+        if (highlighter.startOffset >= document.textLength) {
+            // Problem is no longer visible
+            return null
+        }
+
+        val line = document.getLineNumber(highlighter.startOffset)
+        val info = highlighter.errorStripeTooltip as? HighlightInfo ?: return null
+        val severity = info.severity
+        val description = info.description ?: return null
+
+        if (!highlightSeverities.contains(severity)) {
+            return null
+        }
+
+        return Problem(
+            highlighterId = highlighter.id,
+            line = line,
+            severity = severity,
+            description = description,
+        )
+    }
+
+    private fun maybeRemoveInlineErrorBecauseProblemDisappeared(problem: Problem) {
         val problemsAtLine = problems.atLine(problem.line)
         if (!problemsAtLine.contains(problem)) {
             return
@@ -158,9 +123,8 @@ class ErrorLens(
         problems.remove(problem)
 
         // Remove label associated with this highlighter and create new label at the same line
-        inlayModel
-            .getAfterLineEndElementsForLogicalLine(problem.line)
-            .filter { inlay ->  InlineErrorRenderer::class.java.isInstance(inlay) }
+        inlayModel.getAfterLineEndElementsForLogicalLine(problem.line)
+            .filter { inlay -> InlineErrorRenderer::class.java.isInstance(inlay) }
             .forEach { inlay -> Disposer.dispose(inlay) }
 
         if (problem.line < document.lineCount) {
@@ -168,20 +132,13 @@ class ErrorLens(
         }
     }
 
-    private fun removeInlineErrorAtLineAndScheduleReanalyzeLines(line: Int) {
-        removeInlineErrorAtLine(line)
-
-        linesToReanalyze.add(line)
-
+    private fun scheduleReanalyzeLines() {
         alarm.cancelAllRequests()
         alarm.addRequest({ reanalyzeLines() }, settings.reanalyzeDelayMs)
     }
 
     private fun removeInlineErrorAtLine(line: Int) {
-        assertIsEdt()
-
-        inlayModel
-            .getAfterLineEndElementsForLogicalLine(line)
+        inlayModel.getAfterLineEndElementsForLogicalLine(line)
             .filter { inlay ->
                 InlineErrorRenderer::class.java.isInstance(inlay.renderer)
             }
@@ -191,15 +148,13 @@ class ErrorLens(
     }
 
     private fun reanalyzeLines() {
-        assertIsEdt()
-
         val lines = linesToReanalyze.toList()
         linesToReanalyze.clear()
 
         lines.forEach { line ->
             if (line >= document.lineCount) {
                 // Line has been deleted. Delete associated problems.
-                problems.removeAtLine(line)
+                problems.removeProblemsAtLine(line)
             } else {
                 // Determine whether we need to display an inline error
                 refreshInlineErrorAtLine(line)
@@ -208,17 +163,12 @@ class ErrorLens(
     }
 
     private fun refreshInlineErrorAtLine(line: Int) {
-        assertIsEdt()
-
         removeInlineErrorAtLine(line)
 
-        // Highlighters are sorted by severity, descending
-        val relevantProblems = problems.atLine(line)
-            .sortedBy { problem -> problem.severity }
-            .reversed()
+        // Problems are sorted by severity, descending
+        val relevantProblems = problems.atLine(line).sortedBy { problem -> problem.severity }.reversed()
 
-        if (relevantProblems.isEmpty())
-            return
+        if (relevantProblems.isEmpty()) return
 
         val highestSeverityProblem = relevantProblems[0]
 
@@ -231,18 +181,17 @@ class ErrorLens(
             highestSeverityProblem.description + rest
         }
 
-        val inlineErrorRenderer =
-            InlineErrorRenderer(JBLabel(description), determineColorForErrorSeverity(severity))
+        val inlineErrorRenderer = InlineErrorRenderer(JBLabel(description), determineColorForErrorSeverity(severity))
         val endOffset = document.getLineEndOffset(line)
 
         val inlay = inlayModel.addAfterLineEndElement(
             endOffset,
             /* relatesToPrecedingText */ true,
-            inlineErrorRenderer
+            inlineErrorRenderer,
         )
 
         if (inlay == null) {
-            logger.warn("Unable to create inlay at line $line with description \"$description\"")
+            LOGGER.warn("Unable to create inlay at line $line with description \"$description\"")
             return
         }
     }
@@ -252,8 +201,7 @@ class ErrorLens(
             ?: defaultColors[severity]
             ?: throw RuntimeException("Unable to determine color for " + severity.name)
 
-    override fun dispose() {
-    }
+    override fun dispose() {}
 }
 
 data class Problem(
@@ -265,16 +213,12 @@ data class Problem(
 
 class Problems {
     private val problemsByLine = mutableMapOf<Int, Set<Problem>>()
-    private val problemsByHighlighterId = mutableMapOf<Long, Problem>()
 
     fun add(problem: Problem) {
         problemsByLine.merge(problem.line, mutableSetOf(problem)) { old, new -> old + new }
-        problemsByHighlighterId[problem.highlighterId] = problem
     }
 
     fun remove(problem: Problem) {
-        problemsByHighlighterId.remove(problem.highlighterId)
-
         val problemsAtLine = problemsByLine[problem.line] ?: return
 
         val removed = problemsAtLine.filter { p -> p != problem }.toSet()
@@ -286,10 +230,8 @@ class Problems {
         }
     }
 
-    fun removeAtLine(line: Int) {
-        val removed = problemsByLine.remove(line) ?: return
-
-        removed.forEach { problem -> problemsByHighlighterId.remove(problem.highlighterId) }
+    fun removeProblemsAtLine(line: Int) {
+        problemsByLine.remove(line)
     }
 
     fun atLine(line: Int) = problemsByLine.getOrDefault(line, setOf())
@@ -310,8 +252,4 @@ class InlineErrorRenderer(
         g.color = textColor
         g.drawString(label.text, targetRegion.x, targetRegion.y + editor.ascent)
     }
-}
-
-fun assertIsEdt() {
-    ApplicationManager.getApplication().assertIsDispatchThread()
 }
