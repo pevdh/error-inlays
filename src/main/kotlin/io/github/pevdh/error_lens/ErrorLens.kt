@@ -16,6 +16,7 @@ import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.Alarm
+import com.intellij.util.CommonProcessors.CollectProcessor
 import java.awt.Color
 import java.awt.Graphics
 import java.awt.Rectangle
@@ -25,11 +26,10 @@ private val LOGGER = Logger.getInstance(ErrorLens::class.java)
 class ErrorLens(
     private val document: Document,
     private val inlayModel: InlayModel,
+    private val markupModel: MarkupModelEx,
     private val settings: ErrorLensSettings,
 ) : Disposable {
-    private val problems = Problems()
-
-    private val linesToReanalyze = mutableSetOf<Int>()
+    private val linesScheduledToBeReanalyzed = mutableSetOf<Int>()
     private val alarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
 
     companion object {
@@ -42,7 +42,7 @@ class ErrorLens(
                 return null
             }
 
-            val lens = ErrorLens(document, editor.inlayModel, ErrorLensSettings.instance)
+            val lens = ErrorLens(document, editor.inlayModel, markupModel, ErrorLensSettings.instance)
 
             markupModel.addMarkupModelListener(lens, object : MarkupModelListener {
                 override fun afterAdded(highlighter: RangeHighlighterEx) {
@@ -69,35 +69,135 @@ class ErrorLens(
     }
 
     fun notifyHighlighterAdded(highlighter: RangeHighlighterEx) {
-        val problem = tryConvertToProblem(highlighter) ?: return
-        LOGGER.debug("Problem appeared: $problem")
+        val line = document.getLineNumber(highlighter.startOffset)
 
-        problems.add(problem)
-        refreshInlineErrorAtLine(problem.line)
+        LOGGER.debug("Highlighter added at line $line")
+        if (linesScheduledToBeReanalyzed.contains(line)) {
+            // Line is already scheduled to be re-analyzed
+            // We do not want the inlay to pop up while to user is still typing
+            return
+        }
+
+        refreshInlayAtLine(line)
     }
 
     fun notifyHighlighterRemoved(highlighter: RangeHighlighterEx) {
-        val problem = tryConvertToProblem(highlighter) ?: return
-        LOGGER.debug("Problem disappeared: $problem")
-
-        maybeRemoveInlineErrorBecauseProblemDisappeared(problem)
-    }
-
-    fun notifyLineChanged(line: Int) {
-        LOGGER.debug("Line changed: $line")
-
-        removeInlineErrorAtLine(line)
-        linesToReanalyze.add(line)
-        scheduleReanalyzeLines()
-    }
-
-    private fun tryConvertToProblem(highlighter: RangeHighlighterEx): Problem? {
         if (highlighter.startOffset >= document.textLength) {
-            // Problem is no longer visible
-            return null
+            // We do not need to refresh the inlay
+            // because the line does not exist anymore
+            return
         }
 
         val line = document.getLineNumber(highlighter.startOffset)
+
+        LOGGER.debug("Highlighter removed at line $line")
+        if (linesScheduledToBeReanalyzed.contains(line)) {
+            // Line is already scheduled to be re-analyzed
+            // We do not want the inlay to pop up while to user is still typing
+            removeAnyErrorLensInlayAtLine(line)
+
+            return
+        }
+
+        refreshInlayAtLine(line, ignoredHighlighterIds = setOf(highlighter.id))
+    }
+
+    fun notifyLineChanged(line: Int) {
+        LOGGER.debug("Line $line changed")
+
+        removeAnyErrorLensInlayAtLine(line)
+        scheduleLineToBeReanalyzed(line)
+    }
+
+    private fun scheduleLineToBeReanalyzed(line: Int) {
+        linesScheduledToBeReanalyzed.add(line)
+
+        alarm.cancelAllRequests()
+        alarm.addRequest({ reanalyzeLines() }, settings.reanalyzeDelayMs)
+    }
+
+    private fun reanalyzeLines() {
+        linesScheduledToBeReanalyzed.forEach { line ->
+            // Line could have been deleted
+            if (line < document.lineCount) {
+                refreshInlayAtLine(line)
+            }
+        }
+
+        linesScheduledToBeReanalyzed.clear()
+    }
+
+    private fun removeAnyErrorLensInlayAtLine(line: Int) {
+        LOGGER.debug("Removing all error lens inlays at line $line")
+        inlayModel.getAfterLineEndElementsForLogicalLine(line)
+            .filter { inlay -> InlineErrorRenderer::class.java.isInstance(inlay.renderer) }
+            .forEach { inlay ->
+                LOGGER.debug("Disposing existing inlay")
+                Disposer.dispose(inlay)
+            }
+    }
+
+    private fun refreshInlayAtLine(line: Int) {
+        refreshInlayAtLine(line, setOf())
+    }
+
+    private fun refreshInlayAtLine(line: Int, ignoredHighlighterIds: Set<Long>) {
+        LOGGER.debug("Attempting to refresh inlay at line $line")
+        if (line >= document.lineCount) {
+            return
+        }
+
+        removeAnyErrorLensInlayAtLine(line)
+
+        // Problems are sorted by severity, descending
+        val relevantProblems = findRelevantProblemsAtLine(line)
+            .filter { problem -> !ignoredHighlighterIds.contains(problem.highlighterId) }
+            .sortedBy { problem -> problem.severity }
+            .reversed()
+
+        LOGGER.debug("Found ${relevantProblems.size} relevant problems")
+
+        if (relevantProblems.isEmpty()) return
+
+        val severity = relevantProblems[0].severity
+        val description = formatDescription(
+            highestSeverityProblem = relevantProblems[0],
+            remainingProblems = relevantProblems.drop(1),
+        )
+
+        LOGGER.debug("Creating inline error at line $line with description=$description and severity=$severity")
+
+        val inlineErrorRenderer = InlineErrorRenderer(
+            JBLabel(description), 
+            determineColorForErrorSeverity(severity),
+        )
+        val endOffset = document.getLineEndOffset(line)
+
+        val newInlay = inlayModel.addAfterLineEndElement(
+            endOffset,
+            /* relatesToPrecedingText */ true,
+            inlineErrorRenderer,
+        )
+
+        if (newInlay == null) {
+            LOGGER.warn("Unable to create inlay at line $line with description \"$description\"")
+        }
+    }
+
+    private fun findRelevantProblemsAtLine(line: Int): Set<Problem> {
+        val lineStartOffset = document.getLineStartOffset(line)
+        val lineEndOffset = document.getLineEndOffset(line)
+
+        val highlighters = mutableListOf<RangeHighlighterEx>()
+        val collector = CollectProcessor(highlighters)
+        markupModel.processRangeHighlightersOverlappingWith(lineStartOffset, lineEndOffset, collector)
+
+        return highlighters
+            .mapNotNull { highlighter -> tryConvertToProblem(highlighter) }
+            .toSet()
+    }
+
+    private fun tryConvertToProblem(highlighter: RangeHighlighterEx): Problem? {
         val info = highlighter.errorStripeTooltip as? HighlightInfo ?: return null
         val severity = info.severity
         val description = info.description ?: return null
@@ -108,91 +208,17 @@ class ErrorLens(
 
         return Problem(
             highlighterId = highlighter.id,
-            line = line,
             severity = severity,
             description = description,
         )
     }
 
-    private fun maybeRemoveInlineErrorBecauseProblemDisappeared(problem: Problem) {
-        val problemsAtLine = problems.atLine(problem.line)
-        if (!problemsAtLine.contains(problem)) {
-            return
-        }
-
-        problems.remove(problem)
-
-        // Remove label associated with this highlighter and create new label at the same line
-        inlayModel.getAfterLineEndElementsForLogicalLine(problem.line)
-            .filter { inlay -> InlineErrorRenderer::class.java.isInstance(inlay) }
-            .forEach { inlay -> Disposer.dispose(inlay) }
-
-        if (problem.line < document.lineCount) {
-            refreshInlineErrorAtLine(problem.line)
-        }
-    }
-
-    private fun scheduleReanalyzeLines() {
-        alarm.cancelAllRequests()
-        alarm.addRequest({ reanalyzeLines() }, settings.reanalyzeDelayMs)
-    }
-
-    private fun removeInlineErrorAtLine(line: Int) {
-        inlayModel.getAfterLineEndElementsForLogicalLine(line)
-            .filter { inlay ->
-                InlineErrorRenderer::class.java.isInstance(inlay.renderer)
-            }
-            .forEach { inlay ->
-                Disposer.dispose(inlay)
-            }
-    }
-
-    private fun reanalyzeLines() {
-        val lines = linesToReanalyze.toList()
-        linesToReanalyze.clear()
-
-        lines.forEach { line ->
-            if (line >= document.lineCount) {
-                // Line has been deleted. Delete associated problems.
-                problems.removeProblemsAtLine(line)
-            } else {
-                // Determine whether we need to display an inline error
-                refreshInlineErrorAtLine(line)
-            }
-        }
-    }
-
-    private fun refreshInlineErrorAtLine(line: Int) {
-        removeInlineErrorAtLine(line)
-
-        // Problems are sorted by severity, descending
-        val relevantProblems = problems.atLine(line).sortedBy { problem -> problem.severity }.reversed()
-
-        if (relevantProblems.isEmpty()) return
-
-        val highestSeverityProblem = relevantProblems[0]
-
-        val severity = highestSeverityProblem.severity
-        val description = if (relevantProblems.size == 1) {
+    private fun formatDescription(highestSeverityProblem: Problem, remainingProblems: List<Problem>): String {
+        return if (remainingProblems.isEmpty()) {
             highestSeverityProblem.description
         } else {
-            val rest =
-                if (relevantProblems.size == 2) " and 1 more error" else " and " + (relevantProblems.size - 1) + " more errors"
+            val rest = if (remainingProblems.size == 1) " and 1 more error" else " and " + remainingProblems.size + " more errors"
             highestSeverityProblem.description + rest
-        }
-
-        val inlineErrorRenderer = InlineErrorRenderer(JBLabel(description), determineColorForErrorSeverity(severity))
-        val endOffset = document.getLineEndOffset(line)
-
-        val inlay = inlayModel.addAfterLineEndElement(
-            endOffset,
-            /* relatesToPrecedingText */ true,
-            inlineErrorRenderer,
-        )
-
-        if (inlay == null) {
-            LOGGER.warn("Unable to create inlay at line $line with description \"$description\"")
-            return
         }
     }
 
@@ -206,36 +232,9 @@ class ErrorLens(
 
 data class Problem(
     val highlighterId: Long,
-    val line: Int,
     val severity: HighlightSeverity,
     val description: String,
 )
-
-class Problems {
-    private val problemsByLine = mutableMapOf<Int, Set<Problem>>()
-
-    fun add(problem: Problem) {
-        problemsByLine.merge(problem.line, mutableSetOf(problem)) { old, new -> old + new }
-    }
-
-    fun remove(problem: Problem) {
-        val problemsAtLine = problemsByLine[problem.line] ?: return
-
-        val removed = problemsAtLine.filter { p -> p != problem }.toSet()
-
-        if (removed.isEmpty()) {
-            problemsByLine.remove(problem.line)
-        } else {
-            problemsByLine[problem.line] = removed
-        }
-    }
-
-    fun removeProblemsAtLine(line: Int) {
-        problemsByLine.remove(line)
-    }
-
-    fun atLine(line: Int) = problemsByLine.getOrDefault(line, setOf())
-}
 
 class InlineErrorRenderer(
     private val label: JBLabel,
