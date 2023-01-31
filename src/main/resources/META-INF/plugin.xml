@@ -1,10 +1,10 @@
 <idea-plugin>
-    <id>io.github.pevdh.error-lens</id>
-    <name>Error Lens</name>
+    <id>io.github.pevdh.error-inlays</id>
+    <name>Error Inlays</name>
     <vendor>Pieter van den Ham</vendor>
 
     <description><![CDATA[
-    Error Lens like VS Code's Error Lens plugin, but for JetBrains IDEs
+    Like VS Code's Error Lens plugin, but for JetBrains IDEs
     ]]></description>
 
     <!-- please see https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html
@@ -13,10 +13,10 @@
     <depends>com.intellij.modules.lang</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <postStartupActivity implementation="io.github.pevdh.error_lens.StartupActivity"/>
-        <applicationService serviceImplementation="io.github.pevdh.error_lens.ErrorLensSettings"/>
-        <applicationConfigurable parentId="editor" instance="io.github.pevdh.error_lens.ErrorLensConfigurable"
-                                 id="io.github.pevdh.error_lens.ErrorLensConfigurable" displayName="Error Lens"/>
-        <applicationService serviceImplementation="io.github.pevdh.error_lens.PluginDisposable" />
+        <postStartupActivity implementation="io.github.pevdh.error_inlays.StartupActivity"/>
+        <applicationService serviceImplementation="io.github.pevdh.error_inlays.ErrorInlaysSettings"/>
+        <applicationConfigurable parentId="editor" instance="io.github.pevdh.error_inlays.ErrorInlaysConfigurable"
+                                 id="io.github.pevdh.error_inlays.ErrorInlaysConfigurable" displayName="Error Inlays"/>
+        <applicationService serviceImplementation="io.github.pevdh.error_inlays.PluginDisposable" />
     </extensions>
 </idea-plugin>

@@ -1,4 +1,4 @@
-package io.github.pevdh.error_lens
+package io.github.pevdh.error_inlays
 
 import com.intellij.codeInsight.daemon.impl.HighlightInfo
 import com.intellij.lang.annotation.HighlightSeverity
@@ -22,19 +22,19 @@ import java.awt.Graphics
 import java.awt.Rectangle
 import java.lang.Integer.max
 
-private val LOGGER = Logger.getInstance(ErrorLens::class.java)
+private val logger = Logger.getInstance(ErrorInlayManager::class.java)
 
-class ErrorLens(
+class ErrorInlayManager(
     private val document: Document,
     private val inlayModel: InlayModel,
     private val markupModel: MarkupModelEx,
-    private val settings: ErrorLensSettings,
+    private val settings: ErrorInlaysSettings,
 ) : Disposable {
     private val linesScheduledToBeReanalyzed = mutableSetOf<Int>()
     private val alarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
 
     companion object {
-        fun tryCreateNewInstance(editor: Editor): ErrorLens? {
+        fun tryCreateNewInstance(editor: Editor): ErrorInlayManager? {
             val project = editor.project ?: return null
             val document = editor.document
 
@@ -43,15 +43,15 @@ class ErrorLens(
                 return null
             }
 
-            val lens = ErrorLens(document, editor.inlayModel, markupModel, ErrorLensSettings.instance)
+            val manager = ErrorInlayManager(document, editor.inlayModel, markupModel, ErrorInlaysSettings.instance)
 
-            markupModel.addMarkupModelListener(lens, object : MarkupModelListener {
+            markupModel.addMarkupModelListener(manager, object : MarkupModelListener {
                 override fun afterAdded(highlighter: RangeHighlighterEx) {
-                    lens.notifyHighlighterAdded(highlighter)
+                    manager.notifyHighlighterAdded(highlighter)
                 }
 
                 override fun beforeRemoved(highlighter: RangeHighlighterEx) {
-                    lens.notifyHighlighterRemoved(highlighter)
+                    manager.notifyHighlighterRemoved(highlighter)
                 }
             })
 
@@ -65,23 +65,23 @@ class ErrorLens(
                         if (endOffset < document.textLength) document.getLineNumber(endOffset) else document.lineCount - 1
 
                     for (line in startLine..endLine) {
-                        lens.notifyLineChanged(line)
+                        manager.notifyLineChanged(line)
                     }
                 }
-            }, lens)
+            }, manager)
 
             markupModel.allHighlighters.forEach { highlighter ->
-                lens.notifyHighlighterAdded(highlighter as RangeHighlighterEx)
+                manager.notifyHighlighterAdded(highlighter as RangeHighlighterEx)
             }
 
-            return lens
+            return manager
         }
     }
 
     fun notifyHighlighterAdded(highlighter: RangeHighlighterEx) {
         val line = document.getLineNumber(highlighter.startOffset)
 
-        LOGGER.debug("Highlighter added at line $line")
+        logger.debug("Highlighter added at line $line")
         if (linesScheduledToBeReanalyzed.contains(line)) {
             // Line is already scheduled to be re-analyzed
             // We do not want the inlay to pop up while to user is still typing
@@ -100,11 +100,11 @@ class ErrorLens(
 
         val line = document.getLineNumber(highlighter.startOffset)
 
-        LOGGER.debug("Highlighter removed at line $line")
+        logger.debug("Highlighter removed at line $line")
         if (linesScheduledToBeReanalyzed.contains(line)) {
             // Line is already scheduled to be re-analyzed
             // We do not want the inlay to pop up while to user is still typing
-            removeAnyErrorLensInlayAtLine(line)
+            removeAnyErrorInlayAtLine(line)
 
             return
         }
@@ -113,9 +113,9 @@ class ErrorLens(
     }
 
     fun notifyLineChanged(line: Int) {
-        LOGGER.debug("Line $line changed")
+        logger.debug("Line $line changed")
 
-        removeAnyErrorLensInlayAtLine(line)
+        removeAnyErrorInlayAtLine(line)
         scheduleLineToBeReanalyzed(line)
     }
 
@@ -137,12 +137,12 @@ class ErrorLens(
         linesScheduledToBeReanalyzed.clear()
     }
 
-    private fun removeAnyErrorLensInlayAtLine(line: Int) {
-        LOGGER.debug("Removing all error lens inlays at line $line")
+    private fun removeAnyErrorInlayAtLine(line: Int) {
+        logger.debug("Removing all error inlays at line $line")
         inlayModel.getAfterLineEndElementsForLogicalLine(line)
             .filter { inlay -> InlineErrorRenderer::class.java.isInstance(inlay.renderer) }
             .forEach { inlay ->
-                LOGGER.debug("Disposing existing inlay")
+                logger.debug("Disposing existing inlay")
                 Disposer.dispose(inlay)
             }
     }
@@ -152,12 +152,12 @@ class ErrorLens(
     }
 
     private fun refreshInlayAtLine(line: Int, ignoredHighlighterIds: Set<Long>) {
-        LOGGER.debug("Attempting to refresh inlay at line $line")
+        logger.debug("Attempting to refresh inlay at line $line")
         if (line >= document.lineCount) {
             return
         }
 
-        removeAnyErrorLensInlayAtLine(line)
+        removeAnyErrorInlayAtLine(line)
 
         // Problems are sorted by severity, descending
         val relevantProblems = findRelevantProblemsAtLine(line)
@@ -165,7 +165,7 @@ class ErrorLens(
             .sortedBy { problem -> problem.severity }
             .reversed()
 
-        LOGGER.debug("Found ${relevantProblems.size} relevant problems")
+        logger.debug("Found ${relevantProblems.size} relevant problems")
 
         if (relevantProblems.isEmpty()) return
 
@@ -175,7 +175,7 @@ class ErrorLens(
             remainingProblems = relevantProblems.drop(1),
         )
 
-        LOGGER.debug("Creating inline error at line $line with description=$description and severity=$severity")
+        logger.debug("Creating inline error at line $line with description=$description and severity=$severity")
 
         val inlineErrorRenderer = InlineErrorRenderer(
             JBLabel(description),
@@ -190,7 +190,7 @@ class ErrorLens(
         )
 
         if (newInlay == null) {
-            LOGGER.warn("Unable to create inlay at line $line with description \"$description\"")
+            logger.warn("Unable to create inlay at line $line with description \"$description\"")
         }
     }
 

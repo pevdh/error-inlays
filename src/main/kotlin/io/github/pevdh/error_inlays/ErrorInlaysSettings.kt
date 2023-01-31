@@ -1,4 +1,4 @@
-package io.github.pevdh.error_lens
+package io.github.pevdh.error_inlays
 
 import com.intellij.lang.annotation.HighlightSeverity
 import com.intellij.openapi.application.ApplicationManager
@@ -24,14 +24,14 @@ val defaultColors = mapOf(
 
 val highlightSeverities = defaultColors.keys.toList()
 
-class ErrorLensConfigurable : Configurable {
-    private var component: ErrorLensSettingsComponent? = null
-    private val settings get() = ErrorLensSettings.instance
+class ErrorInlaysConfigurable : Configurable {
+    private var component: ErrorInlaysSettingsComponent? = null
+    private val settings get() = ErrorInlaysSettings.instance
 
-    override fun getDisplayName(): String = "Error Lens"
+    override fun getDisplayName(): String = "Error Inlays"
 
     override fun createComponent(): JComponent? {
-        component = ErrorLensSettingsComponent()
+        component = ErrorInlaysSettingsComponent()
 
         return component?.panel
     }
@@ -87,7 +87,7 @@ class ErrorLensConfigurable : Configurable {
     }
 }
 
-class ErrorLensSettingsComponent {
+class ErrorInlaysSettingsComponent {
     private val mainPanel: JPanel
 
     private val delayMsTextField: IntegerField = IntegerField("Delay in ms", 0, 5000)
@@ -129,11 +129,11 @@ class ErrorLensSettingsComponent {
     }
 }
 
-@State(name = "io.github.pevdh.error_lens.ErrorLensSettings", storages = [Storage("ErrorLensPluginSettings.xml")])
-data class ErrorLensSettings(
+@State(name = "io.github.pevdh.error_inlays.ErrorInlaysSettings", storages = [Storage("ErrorInlaysPluginSettings.xml")])
+data class ErrorInlaysSettings(
     var reanalyzeDelayMs: Int,
     var severityColors: MutableMap<String, Int>,
-) : PersistentStateComponent<ErrorLensSettings> {
+) : PersistentStateComponent<ErrorInlaysSettings> {
 
     @Suppress("unused")
     constructor() : this(
@@ -142,15 +142,15 @@ data class ErrorLensSettings(
     )
 
     companion object {
-        val instance: ErrorLensSettings
-            get() = ApplicationManager.getApplication().getService(ErrorLensSettings::class.java)
+        val instance: ErrorInlaysSettings
+            get() = ApplicationManager.getApplication().getService(ErrorInlaysSettings::class.java)
     }
 
-    override fun getState(): ErrorLensSettings {
+    override fun getState(): ErrorInlaysSettings {
         return this
     }
 
-    override fun loadState(state: ErrorLensSettings) {
+    override fun loadState(state: ErrorInlaysSettings) {
         XmlSerializerUtil.copyBean(state, this)
     }
 

@@ -1,4 +1,4 @@
-package io.github.pevdh.error_lens
+package io.github.pevdh.error_inlays
 
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.Editor
@@ -11,7 +11,7 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.Key
 
 private val LOGGER = Logger.getInstance(StartupActivity::class.java)
-private val ERROR_LENS_INSTANCE_KEY: Key<ErrorLens> = Key<ErrorLens>(ErrorLens::class.java.name)
+private val ERROR_INLAY_MANAGER_INSTANCE_KEY: Key<ErrorInlayManager> = Key(ErrorInlayManager::class.java.name)
 
 class StartupActivity : StartupActivity {
 
@@ -20,30 +20,30 @@ class StartupActivity : StartupActivity {
         editorFactory
             .addEditorFactoryListener(object : EditorFactoryListener {
                 override fun editorCreated(event: EditorFactoryEvent) {
-                    LOGGER.debug("Editor created, attaching new error lens")
+                    LOGGER.debug("Editor created, attaching new error manager")
 
-                    installErrorLens(event.editor)
+                    installManager(event.editor)
                 }
 
                 override fun editorReleased(event: EditorFactoryEvent) {
-                    LOGGER.debug("Editor released, disposing associated error lens")
+                    LOGGER.debug("Editor released, disposing associated error manager")
 
-                    disposeErrorLens(event.editor)
+                    disposeManager(event.editor)
                 }
             }, PluginDisposable.instance)
 
-        editorFactory.allEditors.forEach { editor -> installErrorLens(editor) }
+        editorFactory.allEditors.forEach { editor -> installManager(editor) }
     }
 
-    private fun installErrorLens(editor: Editor) {
-        val lens = ErrorLens.tryCreateNewInstance(editor) ?: return
-        editor.putUserData(ERROR_LENS_INSTANCE_KEY, lens)
+    private fun installManager(editor: Editor) {
+        val manager = ErrorInlayManager.tryCreateNewInstance(editor) ?: return
+        editor.putUserData(ERROR_INLAY_MANAGER_INSTANCE_KEY, manager)
     }
 
-    private fun disposeErrorLens(editor: Editor) {
-        val lens = editor.getUserData(ERROR_LENS_INSTANCE_KEY) ?: return
-        Disposer.dispose(lens)
+    private fun disposeManager(editor: Editor) {
+        val manager = editor.getUserData(ERROR_INLAY_MANAGER_INSTANCE_KEY) ?: return
+        Disposer.dispose(manager)
 
-        editor.putUserData(ERROR_LENS_INSTANCE_KEY, null)
+        editor.putUserData(ERROR_INLAY_MANAGER_INSTANCE_KEY, null)
     }
 }

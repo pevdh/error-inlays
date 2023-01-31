@@ -1,4 +1,4 @@
-package io.github.pevdh.error_lens
+package io.github.pevdh.error_inlays
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
