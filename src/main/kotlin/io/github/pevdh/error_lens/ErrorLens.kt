@@ -61,7 +61,8 @@ class ErrorLens(
                     val endOffset = event.offset + max(event.oldLength, event.newLength)
 
                     val startLine = document.getLineNumber(startOffset)
-                    val endLine = if (endOffset < document.textLength) document.getLineNumber(endOffset) else document.lineCount - 1
+                    val endLine =
+                        if (endOffset < document.textLength) document.getLineNumber(endOffset) else document.lineCount - 1
 
                     for (line in startLine..endLine) {
                         lens.notifyLineChanged(line)
@@ -177,7 +178,7 @@ class ErrorLens(
         LOGGER.debug("Creating inline error at line $line with description=$description and severity=$severity")
 
         val inlineErrorRenderer = InlineErrorRenderer(
-            JBLabel(description), 
+            JBLabel(description),
             determineColorForErrorSeverity(severity),
         )
         val endOffset = document.getLineEndOffset(line)
@@ -229,7 +230,8 @@ class ErrorLens(
         return if (remainingProblems.isEmpty()) {
             highestSeverityProblem.description
         } else {
-            val rest = if (remainingProblems.size == 1) " and 1 more error" else " and " + remainingProblems.size + " more errors"
+            val rest =
+                if (remainingProblems.size == 1) " and 1 more error" else " and " + remainingProblems.size + " more errors"
             highestSeverityProblem.description + rest
         }
     }
@@ -258,8 +260,10 @@ class InlineErrorRenderer(
     override fun paint(inlay: Inlay<*>, g: Graphics, targetRegion: Rectangle, textAttributes: TextAttributes) {
         val editor = inlay.editor
         val colorScheme = editor.colorsScheme
+        val font = colorScheme.getFont(EditorFontType.PLAIN)
+            .deriveFont(/* size */ colorScheme.editorFontSize2D * 0.95f)
 
-        g.font = colorScheme.getFont(EditorFontType.PLAIN)
+        g.font = font
         g.color = textColor
         g.drawString(label.text, targetRegion.x, targetRegion.y + editor.ascent)
     }
