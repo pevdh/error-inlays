@@ -107,7 +107,7 @@ class ErrorInlaysSettingsComponent {
         val builder = FormBuilder.createFormBuilder()
 
         delayMsTextField.isCanBeEmpty = false
-        builder.addLabeledComponent(JBLabel("Delay before rerendering inline annotations"), delayMsTextField, 1, false)
+        builder.addLabeledComponent(JBLabel("Delay before re-rendering error inlays"), delayMsTextField, 1, false)
 
         for (severity in highlightSeverities) {
             ColorPanel().also { panel ->
