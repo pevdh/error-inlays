@@ -20,6 +20,7 @@ import com.intellij.util.CommonProcessors.CollectProcessor
 import java.awt.Color
 import java.awt.Graphics
 import java.awt.Rectangle
+import java.lang.Integer.max
 
 private val LOGGER = Logger.getInstance(ErrorLens::class.java)
 
@@ -56,7 +57,15 @@ class ErrorLens(
 
             document.addDocumentListener(object : DocumentListener {
                 override fun beforeDocumentChange(event: DocumentEvent) {
-                    lens.notifyLineChanged(document.getLineNumber(event.offset))
+                    val startOffset = event.offset
+                    val endOffset = event.offset + max(event.oldLength, event.newLength)
+
+                    val startLine = document.getLineNumber(startOffset)
+                    val endLine = if (endOffset < document.textLength) document.getLineNumber(endOffset) else document.lineCount - 1
+
+                    for (line in startLine..endLine) {
+                        lens.notifyLineChanged(line)
+                    }
                 }
             }, lens)
 
