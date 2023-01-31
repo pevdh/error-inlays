@@ -202,6 +202,9 @@ class ErrorLens(
         markupModel.processRangeHighlightersOverlappingWith(lineStartOffset, lineEndOffset, collector)
 
         return highlighters
+            .filter { highlighter ->
+                highlighter.startOffset in lineStartOffset..lineEndOffset
+            }
             .mapNotNull { highlighter -> tryConvertToProblem(highlighter) }
             .toSet()
     }
