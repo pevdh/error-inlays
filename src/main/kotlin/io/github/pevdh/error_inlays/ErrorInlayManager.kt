@@ -250,6 +250,16 @@ data class Problem(
 )
 
 fun formatProblemDescription(rawDescription: String): String {
+    val description = Strings.unescapeXmlEntities(rawDescription)
+
+    if (description.startsWith("ESLint:")) {
+        return description
+            // Remove ESLint rule identifier at the end of the string.
+            // It can still be viewed when hovering over the error.
+            .replace(Regex("\\(.+\\)$"), "")
+            .trim()
+    }
+
     return Strings.unescapeXmlEntities(rawDescription)
 }
 
