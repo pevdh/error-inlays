@@ -14,6 +14,7 @@ import com.intellij.openapi.editor.impl.DocumentMarkupModel
 import com.intellij.openapi.editor.impl.event.MarkupModelListener
 import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.text.Strings
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.Alarm
 import com.intellij.util.CommonProcessors.CollectProcessor
@@ -170,7 +171,7 @@ class ErrorInlayManager(
         if (relevantProblems.isEmpty()) return
 
         val severity = relevantProblems[0].severity
-        val description = formatDescription(
+        val description = formatInlayDescription(
             highestSeverityProblem = relevantProblems[0],
             remainingProblems = relevantProblems.drop(1),
         )
@@ -222,17 +223,15 @@ class ErrorInlayManager(
         return Problem(
             highlighterId = highlighter.id,
             severity = severity,
-            description = description,
+            description = formatProblemDescription(description),
         )
     }
 
-    private fun formatDescription(highestSeverityProblem: Problem, remainingProblems: List<Problem>): String {
+    private fun formatInlayDescription(highestSeverityProblem: Problem, remainingProblems: List<Problem>): String {
         return if (remainingProblems.isEmpty()) {
             highestSeverityProblem.description
         } else {
-            val rest =
-                if (remainingProblems.size == 1) " and 1 more error" else " and " + remainingProblems.size + " more errors"
-            highestSeverityProblem.description + rest
+            highestSeverityProblem.description + " (and ${remainingProblems.size} more error(s))"
         }
     }
 
@@ -249,6 +248,10 @@ data class Problem(
     val severity: HighlightSeverity,
     val description: String,
 )
+
+fun formatProblemDescription(rawDescription: String): String {
+    return Strings.unescapeXmlEntities(rawDescription)
+}
 
 class InlineErrorRenderer(
     private val label: JBLabel,
